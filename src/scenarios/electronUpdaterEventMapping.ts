@@ -1,89 +1,49 @@
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
 import type { Scenario } from "../harness/scenario.js";
-
-/** `getAdapterState()`'s own public return type -- richer than
- * `wireContract.ts`'s `AdapterState` (the wire shape, no `releaseNotes`).
- * An independent re-declaration, same reasoning as `wireContract.ts`. */
-const ElectronAdapterState = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("idle") }),
-  Schema.Struct({ type: Schema.Literal("checking") }),
-  Schema.Struct({
-    type: Schema.Literal("available"),
-    releaseNotes: Schema.optionalKey(Schema.String),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("downloading"),
-    progress: Schema.optionalKey(Schema.Number),
-    releaseNotes: Schema.optionalKey(Schema.String),
-  }),
-  Schema.Struct({
-    type: Schema.Literal("downloaded"),
-    releaseNotes: Schema.optionalKey(Schema.String),
-  }),
-  Schema.Struct({ type: Schema.Literal("update-cancelled") }),
-  Schema.Struct({
-    type: Schema.Literal("failed"),
-    category: Schema.Literals(["check", "download", "updater"]),
-    code: Schema.String,
-    platformCode: Schema.String,
-  }),
-]);
-
-/** Derived once from that schema -- key-order-independent by construction,
- * unlike a `JSON.stringify` comparison. */
-const adapterStatesAreEquivalent = Schema.toEquivalence(ElectronAdapterState);
-
-/** One row: inject this event against a fresh adapter, then assert the
- * exact resulting `AdapterState`. An independent copy of the expected
- * mapping, so importing the adapter's own code couldn't mask drift. */
-interface LifecycleCase {
-  readonly description: string;
-  readonly eventName: string;
-  readonly payload: unknown;
-  readonly expectedState: typeof ElectronAdapterState.Type;
-}
+import {
+  createElectronTestAdapter,
+  lifecycleScenario,
+  type LifecycleCase,
+} from "./electronTestAdapter.js";
 
 const lifecycleCases: ReadonlyArray<LifecycleCase> = [
   {
     description: "checking-for-update maps to checking",
     eventName: "checking-for-update",
-    payload: null,
+    payload: [],
     expectedState: { type: "checking" },
   },
   {
     description: "update-not-available collapses to idle",
     eventName: "update-not-available",
-    payload: null,
+    payload: [],
     expectedState: { type: "idle" },
   },
   {
     description: "update-available maps to available",
     eventName: "update-available",
-    payload: { releaseNotes: "fixed a thing" },
+    payload: [{ releaseNotes: "fixed a thing" }],
     expectedState: { type: "available", releaseNotes: "fixed a thing" },
   },
   // electron-updater's own `ProgressInfo` always carries a required `percent`
-  // (confirmed from its own source) -- there is no real "downloading without
-  // progress" case for this adapter. That gap belongs to the built-in
-  // autoUpdater adapter, which has no download-progress event at all, and is
-  // covered when that adapter's own scenarios are added.
+  // -- there is no real "downloading without progress" case for this
+  // adapter (the built-in autoUpdater adapter has no progress event at all).
   {
     description: "download-progress carries a rounded percent",
     eventName: "download-progress",
-    payload: { percent: 42.7 },
+    payload: [{ percent: 42.7 }],
     expectedState: { type: "downloading", progress: 43 },
   },
   {
     description: "update-downloaded maps to downloaded",
     eventName: "update-downloaded",
-    payload: null,
+    payload: [],
     expectedState: { type: "downloaded" },
   },
   {
     description: "update-cancelled maps to its own state, never idle or failed",
     eventName: "update-cancelled",
-    payload: null,
+    payload: [],
     expectedState: { type: "update-cancelled" },
   },
 ];
@@ -216,61 +176,18 @@ const errorCases: ReadonlyArray<ErrorCase> = [
   },
 ];
 
-function lifecycleScenario(testCase: LifecycleCase): Scenario {
-  return {
-    name: `electron-updater: ${testCase.description}`,
-    tier: 1,
-    run: ({ testService }) =>
-      Effect.gen(function* () {
-        const adapter = yield* testService.testService.createAdapter({
-          payload: { checkInBaseUrl: "http://unused", publicKeyPem: "unused" },
-        });
-
-        yield* testService.testService.runCommand({
-          params: { id: adapter.id },
-          payload: {
-            command: "injectEvent",
-            eventName: testCase.eventName,
-            payload: testCase.payload,
-          },
-        });
-        const state = yield* testService.testService.runCommand({
-          params: { id: adapter.id },
-          payload: { command: "getAdapterState" },
-        });
-
-        if (
-          !adapterStatesAreEquivalent(
-            state.result as typeof ElectronAdapterState.Type,
-            testCase.expectedState,
-          )
-        ) {
-          return yield* Effect.die(
-            new Error(
-              `expected ${JSON.stringify(testCase.expectedState)}, got ${JSON.stringify(state.result)}`,
-            ),
-          );
-        }
-
-        yield* testService.testService.destroyAdapter({ params: { id: adapter.id } });
-      }),
-  };
-}
-
 function errorScenario(testCase: ErrorCase): Scenario {
   return {
     name: `electron-updater: error code ${testCase.code} maps to failureMode "${testCase.expectedFailureMode}" phase "${testCase.expectedPhase}"`,
     tier: 1,
     run: ({ testService }) =>
       Effect.gen(function* () {
-        const adapter = yield* testService.testService.createAdapter({
-          payload: { checkInBaseUrl: "http://unused", publicKeyPem: "unused" },
-        });
+        const adapter = yield* createElectronTestAdapter(testService, "electron-updater");
 
         if (testCase.precedingEvent) {
           yield* testService.testService.runCommand({
             params: { id: adapter.id },
-            payload: { command: "injectEvent", eventName: testCase.precedingEvent, payload: null },
+            payload: { command: "injectEvent", eventName: testCase.precedingEvent, payload: [] },
           });
         }
 
@@ -279,7 +196,11 @@ function errorScenario(testCase: ErrorCase): Scenario {
           // The real adapter's own mapping logic only ever reads `error.code`
           // (never `.message`) -- a plain `{ code }` object survives the
           // JSON round-trip identically to a real `Error` for this purpose.
-          payload: { command: "injectEvent", eventName: "error", payload: { code: testCase.code } },
+          payload: {
+            command: "injectEvent",
+            eventName: "error",
+            payload: [{ code: testCase.code }],
+          },
         });
         const state = yield* testService.testService.runCommand({
           params: { id: adapter.id },
@@ -329,9 +250,7 @@ const getLastUpdateErrorIsUndefinedUntilSomethingFails: Scenario = {
   tier: 1,
   run: ({ testService }) =>
     Effect.gen(function* () {
-      const adapter = yield* testService.testService.createAdapter({
-        payload: { checkInBaseUrl: "http://unused", publicKeyPem: "unused" },
-      });
+      const adapter = yield* createElectronTestAdapter(testService, "electron-updater");
       const lastError = yield* testService.testService.runCommand({
         params: { id: adapter.id },
         payload: { command: "getLastUpdateError" },
@@ -348,7 +267,9 @@ const getLastUpdateErrorIsUndefinedUntilSomethingFails: Scenario = {
 };
 
 export const electronUpdaterEventMappingScenarios: ReadonlyArray<Scenario> = [
-  ...lifecycleCases.map(lifecycleScenario),
+  ...lifecycleCases.map((testCase) =>
+    lifecycleScenario("electron-updater", "electron-updater", testCase),
+  ),
   ...errorCases.map(errorScenario),
   getLastUpdateErrorIsUndefinedUntilSomethingFails,
 ];

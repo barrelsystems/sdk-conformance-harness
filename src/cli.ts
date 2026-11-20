@@ -7,10 +7,16 @@ import { FetchHttpClient } from "effect/http";
 import { runEquivalenceCheck } from "./harness/equivalence.js";
 import { renderJUnitXml, toJUnitCase, type JUnitCase } from "./harness/junitReport.js";
 import { runAllScenarios } from "./harness/runAll.js";
+import type { Scenario } from "./harness/scenario.js";
 import { connectToTestService } from "./harness/testServiceClient.js";
 import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
 import { happyPathCheckIn } from "./scenarios/happyPathCheckIn.js";
 import { electronUpdaterEventMappingScenarios } from "./scenarios/electronUpdaterEventMapping.js";
+import { builtinUpdaterEventMappingScenarios } from "./scenarios/builtinUpdaterEventMapping.js";
+
+const PLATFORM_SCENARIOS: Readonly<Record<string, ReadonlyArray<Scenario>>> = {
+  electron: [...electronUpdaterEventMappingScenarios, ...builtinUpdaterEventMappingScenarios],
+};
 
 /** `happyPathCheckIn` is gated on the declared `supportsCheckIn`, not
  * assumed -- an `injectEvent`-only test service never implements it, so
@@ -19,8 +25,7 @@ function scenariosFor(capabilities: {
   readonly sdkName: string;
   readonly supportsCheckIn: boolean;
 }) {
-  const platformScenarios =
-    capabilities.sdkName === "electron-updater" ? electronUpdaterEventMappingScenarios : [];
+  const platformScenarios = PLATFORM_SCENARIOS[capabilities.sdkName] ?? [];
 
   return capabilities.supportsCheckIn
     ? [happyPathCheckIn, ...platformScenarios]

@@ -5,9 +5,13 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
  * small standalone HTTP service. This file is the one normative definition;
  * each language's own test service implements the same wire shape independently. */
 
+/** `variant` lets a test service wrapping more than one underlying
+ * adapter choose which one a scenario exercises -- interpreted however
+ * each platform's own test service needs to. */
 export const CreateAdapterRequest = Schema.Struct({
   checkInBaseUrl: Schema.String,
   publicKeyPem: Schema.String,
+  variant: Schema.optionalKey(Schema.String),
 });
 export type CreateAdapterRequest = typeof CreateAdapterRequest.Type;
 
