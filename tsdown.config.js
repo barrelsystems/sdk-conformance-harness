@@ -6,4 +6,7 @@ export default defineConfig({
   dts: true,
   clean: true,
   platform: "node",
+  // `platform: "node"` auto-enables `fixedExtension` (.mjs/.d.mts); this
+  // package's exports map expects .js/.d.ts, matching its `type: "module"`.
+  outExtensions: () => ({ js: ".js", dts: ".d.ts" }),
 });
