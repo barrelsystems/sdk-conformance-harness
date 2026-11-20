@@ -28,8 +28,8 @@ function escapeXml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-export function renderJUnitXml(cases: ReadonlyArray<JUnitCase>): string {
-  const bySuite = new Map<string, JUnitCase[]>();
+function groupBySuite(cases: ReadonlyArray<JUnitCase>): Map<string, Array<JUnitCase>> {
+  const bySuite = new Map<string, Array<JUnitCase>>();
 
   for (const testCase of cases) {
     const suite = bySuite.get(testCase.suiteName) ?? [];
@@ -38,22 +38,35 @@ export function renderJUnitXml(cases: ReadonlyArray<JUnitCase>): string {
     bySuite.set(testCase.suiteName, suite);
   }
 
-  const suitesXml = [...bySuite.entries()]
-    .map(([suiteName, suiteCases]) => {
-      const failureCount = suiteCases.filter((testCase) => !testCase.passed).length;
-      const casesXml = suiteCases
-        .map((testCase) => {
-          const failure =
-            testCase.passed || !testCase.failureMessage
-              ? ""
-              : `\n      <failure message="${escapeXml(testCase.failureMessage)}" />`;
+  return bySuite;
+}
 
-          return `    <testcase name="${escapeXml(testCase.name)}" classname="${escapeXml(suiteName)}">${failure}\n    </testcase>`;
-        })
-        .join("\n");
+function renderTestCase(testCase: JUnitCase): string {
+  if (testCase.passed || !testCase.failureMessage) {
+    return `    <testcase name="${escapeXml(testCase.name)}" classname="${escapeXml(testCase.suiteName)}" />`;
+  }
 
-      return `  <testsuite name="${escapeXml(suiteName)}" tests="${suiteCases.length}" failures="${failureCount}">\n${casesXml}\n  </testsuite>`;
-    })
+  return [
+    `    <testcase name="${escapeXml(testCase.name)}" classname="${escapeXml(testCase.suiteName)}">`,
+    `      <failure message="${escapeXml(testCase.failureMessage)}" />`,
+    `    </testcase>`,
+  ].join("\n");
+}
+
+function renderTestSuite(suiteName: string, suiteCases: ReadonlyArray<JUnitCase>): string {
+  const failureCount = suiteCases.filter((testCase) => !testCase.passed).length;
+  const casesXml = suiteCases.map(renderTestCase).join("\n");
+
+  return [
+    `  <testsuite name="${escapeXml(suiteName)}" tests="${suiteCases.length}" failures="${failureCount}">`,
+    casesXml,
+    `  </testsuite>`,
+  ].join("\n");
+}
+
+export function renderJUnitXml(cases: ReadonlyArray<JUnitCase>): string {
+  const suitesXml = [...groupBySuite(cases)]
+    .map(([suiteName, suiteCases]) => renderTestSuite(suiteName, suiteCases))
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n${suitesXml}\n</testsuites>\n`;

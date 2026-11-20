@@ -29,6 +29,13 @@ export const AdapterCommand = Schema.Union([
     eventName: Schema.String,
     payload: Schema.Unknown,
   }),
+  // Added for pre-action-check conformance coverage; not yet implemented
+  // by any real SDK's test service, so expect this to fail/decode-error
+  // there until each one adds it.
+  Schema.Struct({
+    command: Schema.Literal("triggerPreActionCheck"),
+    stage: Schema.Literals(["pre-download", "pre-apply"]),
+  }),
 ]);
 export type AdapterCommand = typeof AdapterCommand.Type;
 
