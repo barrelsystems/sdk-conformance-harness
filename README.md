@@ -31,15 +31,30 @@ re-implemented by each test service.
 
 ```sh
 pnpm build
-node dist/cli.js conformance <your-test-service-base-url> [--junit <path>]
+node dist/cli.js conformance <your-test-service-base-url> [--junit <path>] [--history <path>] [--history-runs <n>]
 node dist/cli.js equivalence <name1>=<url1> <name2>=<url2> ... [--junit <path>]
 ```
 
 `--junit` additionally writes results as JUnit XML, which GitHub Actions'
 own test-reporting tooling consumes directly for a PR-visible check summary.
 
+`--history` (default `.conformance-history.json`, resolved relative to the
+current directory) is the run-history file tier-1 relegation reads and
+updates every run. Commit it in whichever repo invokes this CLI -- each
+SDK repo's own CI needs to persist it across runs by committing the
+updated file back after a conformance run, which this harness can't do
+on its own. The read-modify-write against that file is unsynchronized,
+so concurrent runs sharing one history path (a CI matrix, retries) can
+race and lose updates, and a forked-PR run with no push-back access will
+never accumulate real history.
+
 ## Scenario tiers
 
-Scenarios are tiered rather than binary pass/fail: Tier 1 scenarios must
-pass at 100%; Tier 2 scenarios may regress to an 80% pass rate before
-relegation. See each scenario's own `tier` field.
+Scenarios are tiered rather than binary pass/fail: tier 1 must pass at
+100%; tier 2 may regress to an 80% pass rate before the run fails. See
+each scenario's own `tier` field.
+
+A tier-1 scenario that fails every one of its last `--history-runs` runs
+(default 5) auto-relegates to tier 2 for that run's gate -- logged loudly
+as `RELEGATED: ...` -- rather than continuing to build-fail CI on a
+regression nobody's fixed yet.

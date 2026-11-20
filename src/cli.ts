@@ -4,39 +4,41 @@ import { NodeRuntime } from "@effect/platform-node";
 import { Command } from "commander";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient } from "effect/http";
+import { applyRelegations, tier2PassRateBelowThreshold } from "./harness/conformanceGate.js";
 import { runEquivalenceCheck } from "./harness/equivalence.js";
 import { renderJUnitXml, toJUnitCase, type JUnitCase } from "./harness/junitReport.js";
+import { DEFAULT_TRACKED_RUNS } from "./harness/relegationHistory.js";
 import { runAllScenarios } from "./harness/runAll.js";
 import type { Scenario } from "./harness/scenario.js";
 import { connectToTestService } from "./harness/testServiceClient.js";
-import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
 import { happyPathCheckIn } from "./scenarios/happyPathCheckIn.js";
-import { electronUpdaterEventMappingScenarios } from "./scenarios/electronUpdaterEventMapping.js";
-import { builtinUpdaterEventMappingScenarios } from "./scenarios/builtinUpdaterEventMapping.js";
+import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
+import { preActionCheckRoundTrip } from "./scenarios/preActionCheck.js";
+import { resilienceScenarios } from "./scenarios/resilience.js";
 
-const PLATFORM_SCENARIOS: Readonly<Record<string, ReadonlyArray<Scenario>>> = {
-  electron: [...electronUpdaterEventMappingScenarios, ...builtinUpdaterEventMappingScenarios],
-};
+/** Every scenario needing the check-in handshake (mock backend + signed
+ * keypair), not just `injectEvent` -- gated on `supportsCheckIn`, since a
+ * test service without it can't run any of these. */
+const CHECK_IN_SCENARIOS: ReadonlyArray<Scenario> = [
+  happyPathCheckIn,
+  ...resilienceScenarios,
+  preActionCheckRoundTrip,
+];
 
-/** `happyPathCheckIn` is gated on the declared `supportsCheckIn`, not
- * assumed -- an `injectEvent`-only test service never implements it, so
- * bundling it unconditionally would guarantee a failure, not add a check. */
 function scenariosFor(capabilities: {
-  readonly sdkName: string;
   readonly supportsCheckIn: boolean;
-}) {
-  const platformScenarios = PLATFORM_SCENARIOS[capabilities.sdkName] ?? [];
-
-  return capabilities.supportsCheckIn
-    ? [happyPathCheckIn, ...platformScenarios]
-    : platformScenarios;
+}): ReadonlyArray<Scenario> {
+  return capabilities.supportsCheckIn ? CHECK_IN_SCENARIOS : [];
 }
 
 function writeJUnitReport(path: string, cases: ReadonlyArray<JUnitCase>): void {
   writeFileSync(path, renderJUnitXml(cases));
 }
 
-function runConformance(testServiceBaseUrl: string, options: { readonly junit?: string }) {
+function runConformance(
+  testServiceBaseUrl: string,
+  options: { readonly junit?: string; readonly history: string; readonly historyRuns: number },
+) {
   return Effect.gen(function* () {
     const testService = yield* connectToTestService(testServiceBaseUrl).pipe(
       Effect.provide(FetchHttpClient.layer),
@@ -65,9 +67,23 @@ function runConformance(testServiceBaseUrl: string, options: { readonly junit?: 
       );
     }
 
-    const failedRequiredTier = results.some((result) => !result.passed && result.tier === 1);
+    const { effectiveResults, relegated } = applyRelegations(
+      results,
+      options.history,
+      options.historyRuns,
+    );
 
-    if (failedRequiredTier) process.exitCode = 1;
+    for (const name of relegated) {
+      console.error(
+        `RELEGATED: "${name}" failed every one of its last ${options.historyRuns} runs -- ` +
+          `auto-relegated from tier 1 to tier 2 for this run's gate.`,
+      );
+    }
+
+    const tier1Failed = effectiveResults.some((result) => !result.passed && result.tier === 1);
+    const tier2Failed = tier2PassRateBelowThreshold(effectiveResults);
+
+    if (tier1Failed || tier2Failed) process.exitCode = 1;
   });
 }
 
@@ -122,9 +138,25 @@ program
   .command("conformance <test-service-base-url>")
   .description("run this SDK's conformance scenarios against its own test service")
   .option("--junit <path>", "also write results as JUnit XML, for CI PR-check integration")
-  .action((testServiceBaseUrl: string, options: { junit?: string }) => {
-    NodeRuntime.runMain(runConformance(testServiceBaseUrl, options));
-  });
+  .option(
+    "--history <path>",
+    "run-history file tracking each scenario's pass/fail record, for tier-1 relegation",
+    ".conformance-history.json",
+  )
+  .option(
+    "--history-runs <n>",
+    "how many recent runs a scenario's relegation/trend is tracked over",
+    (value: string) => Number.parseInt(value, 10),
+    DEFAULT_TRACKED_RUNS,
+  )
+  .action(
+    (
+      testServiceBaseUrl: string,
+      options: { junit?: string; history: string; historyRuns: number },
+    ) => {
+      NodeRuntime.runMain(runConformance(testServiceBaseUrl, options));
+    },
+  );
 
 program
   .command("equivalence <name=url...>")
