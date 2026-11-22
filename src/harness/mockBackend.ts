@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema";
+import { CheckInRequest as CheckInRequestSchema } from "../protocol/wireContract.js";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,6 +19,7 @@ import { serveHttpApiOnEphemeralPort } from "./serveHttpApi.js";
  * scenario drives the backend rather than the backend guessing. */
 export interface MockBackendHandle {
   readonly baseUrl: string;
+  readonly receivedRawCheckIns: () => Effect.Effect<ReadonlyArray<unknown>>;
   readonly setNextResponse: (response: CheckInResponse) => Effect.Effect<void>;
   readonly receivedCheckIns: () => Effect.Effect<ReadonlyArray<CheckInRequest>>;
   /** Delays every later check-in response by this long, until cleared --
@@ -43,6 +46,7 @@ export interface MockBackendHandle {
  * interrupted, and the port released, when that scope closes. */
 export function startMockBackend() {
   return Effect.gen(function* () {
+    const rawReceived = yield* Ref.make<ReadonlyArray<unknown>>([]);
     const nextResponse = yield* Ref.make<CheckInResponse | null>(null);
     const received = yield* Ref.make<ReadonlyArray<CheckInRequest>>([]);
     const nextDelay = yield* Ref.make<Duration.Input | null>(null);
@@ -87,7 +91,14 @@ export function startMockBackend() {
 
     const GroupLayer = HttpApiBuilder.group(MockBackendHttpApi, "ingestion", (handlers) =>
       handlers
-        .handle("checkIn", ({ payload }) => respond(payload))
+        .handle("checkIn", ({ payload }) =>
+          Effect.gen(function* () {
+            yield* Ref.update(rawReceived, (log) => [...log, payload]);
+            return yield* respond(
+              yield* Schema.decodeUnknownEffect(CheckInRequestSchema)(payload).pipe(Effect.orDie),
+            );
+          }),
+        )
         .handle("preActionCheck", ({ payload }) => respondToPreActionCheck(payload)),
     );
 
@@ -99,6 +110,7 @@ export function startMockBackend() {
 
     return {
       baseUrl: `http://localhost:${port}`,
+      receivedRawCheckIns: () => Ref.get(rawReceived),
       setNextResponse: (response: CheckInResponse) => Ref.set(nextResponse, response),
       receivedCheckIns: () => Ref.get(received),
       setNextCheckInDelay: (duration: Duration.Input | null) => Ref.set(nextDelay, duration),
