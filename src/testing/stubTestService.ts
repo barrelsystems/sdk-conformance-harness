@@ -75,6 +75,7 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
           eventId: randomUUID(),
           checkedInAt: new Date().toISOString(),
           sdkVersion: "0.0.0",
+          channel: "stable",
           observedVersion: "0.0.0",
           platform: "test",
           arch: "test",

@@ -28,6 +28,15 @@ export const happyPathCheckIn: Scenario = {
         params: { id: adapter.id },
         payload: { command: "checkNow" },
       });
+      const checkIns = yield* backend.receivedCheckIns();
+      const latest = checkIns[checkIns.length - 1];
+
+      if (latest?.channel !== "stable") {
+        return yield* Effect.die(
+          new Error(`expected default channel "stable", got ${latest?.channel}`),
+        );
+      }
+
       const state = yield* testService.testService.runCommand({
         params: { id: adapter.id },
         payload: { command: "getAdapterState" },
