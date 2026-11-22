@@ -28,6 +28,11 @@ run in each SDK repo's own CI.
 Scenarios drive production cadence, download, and apply paths; counters at the
 native updater boundary verify which actions actually start. Pre-action checks
 must finish before either action starts and must preserve the cached Policy.
+Cadence scenarios verify configured intervals, opt-in diagnostics, lifecycle
+triggers, bounded requests, skipped overlapping attempts, installation-ID save
+recovery, and UTF-8 attribute bounds on production check-ins. Lifecycle commands
+use native notifications on Electron/Swift and the production focus-event handler
+on Tauri, whose mock runtime cannot emit OS focus events.
 Buffer scenarios exercise production stores, raw check-in payloads, and orderly
 process exit: adjacent merging, 32-entry priority eviction, title exclusion,
 concurrent writes, and clearing only the acknowledged snapshot. Blocked native

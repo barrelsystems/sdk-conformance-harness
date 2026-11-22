@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { preActionCheckScenarios } from "../scenarios/preActionCheck.js";
 import { policyScenarios } from "../scenarios/policy.js";
 import {
+  boundedCheckInTimeoutFailsOpen,
   checkInFailureFailsOpen,
   noOverlappingCheckInAttempts,
   resilienceScenarios,
@@ -14,7 +15,9 @@ describe("resilience and pre-action-check scenarios against the real stub test s
   it("passes the deterministic resilience scenarios (excludes the slow bounded-timeout one)", () =>
     Effect.gen(function* () {
       const testServiceBaseUrl = yield* startStubTestService();
-      const deterministic = resilienceScenarios.filter((scenario) => scenario.tier === 1);
+      const deterministic = resilienceScenarios.filter(
+        (scenario) => scenario !== boundedCheckInTimeoutFailsOpen,
+      );
       const results = yield* runAllScenarios(testServiceBaseUrl, deterministic);
 
       expect(results).toEqual([

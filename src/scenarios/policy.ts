@@ -3,7 +3,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { Scenario, ScenarioContext } from "../harness/scenario.js";
 import { generateTestKeypair, type TestKeypair } from "../protocol/signing.js";
-import { UpdaterActivity, type AdapterCommand } from "../protocol/testServiceApi.js";
+import {
+  UpdaterActivity,
+  type AdapterCommand,
+  type CreateAdapterRequest,
+} from "../protocol/testServiceApi.js";
 import type { Policy } from "../protocol/wireContract.js";
 
 const base = { issuedAt: "2026-01-01T00:00:00.000Z", environment: "test" };
@@ -42,6 +46,7 @@ export function withPolicyAdapter(
   run: (
     command: (payload: AdapterCommand) => Effect.Effect<unknown, unknown>,
   ) => Effect.Effect<void, unknown>,
+  config: Partial<CreateAdapterRequest> = {},
 ) {
   const api = context.testService.testService;
 
@@ -50,6 +55,7 @@ export function withPolicyAdapter(
       payload: {
         checkInBaseUrl: context.backend.baseUrl,
         publicKeyPem: context.keypair.publicKeyPem,
+        ...config,
       },
     }),
     ({ id }) =>
