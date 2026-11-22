@@ -7,6 +7,7 @@ import type { Policy } from "./wireContract.js";
  * exact UTF-8 bytes of `JSON.stringify(policy)`. */
 export interface TestKeypair {
   readonly publicKeyPem: string;
+  readonly signRaw: (policyJson: string) => Effect.Effect<{ policy: string; signature: string }>;
   readonly sign: (policy: Policy) => Effect.Effect<{ policy: string; signature: string }>;
 }
 
@@ -23,19 +24,18 @@ export function generateTestKeypair(): Effect.Effect<TestKeypair> {
     const publicBase64 = Buffer.from(publicDer).toString("base64");
     const publicKeyPem = `-----BEGIN PUBLIC KEY-----\n${publicBase64}\n-----END PUBLIC KEY-----\n`;
 
-    return {
-      publicKeyPem,
-      sign: (policy: Policy) =>
-        Effect.promise(async () => {
-          const policyJson = JSON.stringify(policy);
-          const raw = await webcrypto.subtle.sign(
-            "Ed25519",
-            privateKey,
-            new TextEncoder().encode(policyJson),
-          );
+    function signRaw(policyJson: string) {
+      return Effect.promise(async () => {
+        const raw = await webcrypto.subtle.sign(
+          "Ed25519",
+          privateKey,
+          new TextEncoder().encode(policyJson),
+        );
 
-          return { policy: policyJson, signature: Buffer.from(raw).toString("base64") };
-        }),
-    };
+        return { policy: policyJson, signature: Buffer.from(raw).toString("base64") };
+      });
+    }
+
+    return { publicKeyPem, signRaw, sign: (policy: Policy) => signRaw(JSON.stringify(policy)) };
   });
 }

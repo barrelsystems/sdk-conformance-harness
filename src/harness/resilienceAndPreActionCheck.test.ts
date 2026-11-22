@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
-import { preActionCheckRoundTrip } from "../scenarios/preActionCheck.js";
+import { preActionCheckScenarios } from "../scenarios/preActionCheck.js";
+import { policyScenarios } from "../scenarios/policy.js";
 import {
   checkInFailureFailsOpen,
   noOverlappingCheckInAttempts,
@@ -22,11 +23,16 @@ describe("resilience and pre-action-check scenarios against the real stub test s
       ]);
     }).pipe(Effect.scoped, Effect.runPromise));
 
-  it("passes the pre-action-check round trip", () =>
-    Effect.gen(function* () {
-      const testServiceBaseUrl = yield* startStubTestService();
-      const results = yield* runAllScenarios(testServiceBaseUrl, [preActionCheckRoundTrip]);
+  it(
+    "passes Policy and pre-action-check coverage",
+    () =>
+      Effect.gen(function* () {
+        const testServiceBaseUrl = yield* startStubTestService();
+        const scenarios = [...policyScenarios, ...preActionCheckScenarios];
+        const results = yield* runAllScenarios(testServiceBaseUrl, scenarios);
 
-      expect(results).toEqual([{ name: preActionCheckRoundTrip.name, tier: 2, passed: true }]);
-    }).pipe(Effect.scoped, Effect.runPromise));
+        expect(results).toEqual(scenarios.map(({ name, tier }) => ({ name, tier, passed: true })));
+      }).pipe(Effect.scoped, Effect.runPromise),
+    35_000,
+  );
 });

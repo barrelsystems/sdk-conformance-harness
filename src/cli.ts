@@ -13,7 +13,8 @@ import type { Scenario } from "./harness/scenario.js";
 import { connectToTestService } from "./harness/testServiceClient.js";
 import { happyPathCheckIn } from "./scenarios/happyPathCheckIn.js";
 import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
-import { preActionCheckRoundTrip } from "./scenarios/preActionCheck.js";
+import { preActionCheckScenarios } from "./scenarios/preActionCheck.js";
+import { policyScenarios } from "./scenarios/policy.js";
 import { resilienceScenarios } from "./scenarios/resilience.js";
 
 /** Every scenario needing the check-in handshake (mock backend + signed
@@ -22,7 +23,8 @@ import { resilienceScenarios } from "./scenarios/resilience.js";
 const CHECK_IN_SCENARIOS: ReadonlyArray<Scenario> = [
   happyPathCheckIn,
   ...resilienceScenarios,
-  preActionCheckRoundTrip,
+  ...policyScenarios,
+  ...preActionCheckScenarios,
 ];
 
 function scenariosFor(capabilities: {

@@ -17,11 +17,17 @@ run in each SDK repo's own CI.
    check-in/pre-action-check backend, fully under a scenario's control (what
    `Policy` to return, signed with a fresh per-run keypair).
 2. Each SDK repo implements a small "test service": a standalone HTTP server,
-   in that SDK's own language, that calls its real adapter code and exposes
+   in that SDK's own language, that calls its production runtime and exposes
    it over the contract in `src/protocol/testServiceApi.ts`.
 3. This harness drives that test service through a set of scenarios, each
    asserting the adapter's resulting state/behavior matches the protocol
-   spec.
+   spec: signed Policy decoding and caching, informational priority hints,
+   signature rejection, and fail-open pre-action checks at both stages.
+
+`getPolicy` calls the public SDK getter (`null` before a verified check-in).
+Scenarios drive production cadence, download, and apply paths; counters at the
+native updater boundary verify which actions actually start. Pre-action checks
+must finish before either action starts and must preserve the cached Policy.
 
 No shared runtime code crosses the language boundary — only the protocol
 definitions in `src/protocol/` are the normative contract, independently

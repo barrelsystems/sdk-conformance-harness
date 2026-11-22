@@ -31,6 +31,10 @@ export interface MockBackendHandle {
    * in flight at once -- how a no-overlap scenario would observe overlap. */
   readonly peakConcurrentCheckIns: () => Effect.Effect<number>;
   readonly setNextPreActionCheckResponse: (response: CheckInResponse) => Effect.Effect<void>;
+  readonly setNextPreActionCheckDelay: (duration: Duration.Input | null) => Effect.Effect<void>;
+  readonly setNextPreActionCheckFailure: (options: {
+    readonly shouldFail: boolean;
+  }) => Effect.Effect<void>;
   readonly receivedPreActionChecks: () => Effect.Effect<ReadonlyArray<PreActionCheckRequest>>;
 }
 
@@ -45,6 +49,8 @@ export function startMockBackend() {
     const nextFailure = yield* Ref.make(false);
     const inFlight = yield* Ref.make(0);
     const peakInFlight = yield* Ref.make(0);
+    const preActionDelay = yield* Ref.make<Duration.Input | null>(null);
+    const preActionFailure = yield* Ref.make(false);
     const nextPreActionResponse = yield* Ref.make<CheckInResponse | null>(null);
     const receivedPreActionChecks = yield* Ref.make<ReadonlyArray<PreActionCheckRequest>>([]);
 
@@ -61,6 +67,13 @@ export function startMockBackend() {
       request: PreActionCheckRequest,
     ) {
       yield* Ref.update(receivedPreActionChecks, (log) => [...log, request]);
+
+      const delay = yield* Ref.get(preActionDelay);
+
+      if (delay !== null) yield* Effect.sleep(delay);
+      if (yield* Ref.get(preActionFailure)) {
+        return yield* Effect.die(new Error("mock backend: injected pre-action-check failure"));
+      }
 
       const response = yield* Ref.get(nextPreActionResponse);
 
@@ -94,6 +107,10 @@ export function startMockBackend() {
       peakConcurrentCheckIns: () => Ref.get(peakInFlight),
       setNextPreActionCheckResponse: (response: CheckInResponse) =>
         Ref.set(nextPreActionResponse, response),
+      setNextPreActionCheckDelay: (duration: Duration.Input | null) =>
+        Ref.set(preActionDelay, duration),
+      setNextPreActionCheckFailure: ({ shouldFail }: { readonly shouldFail: boolean }) =>
+        Ref.set(preActionFailure, shouldFail),
       receivedPreActionChecks: () => Ref.get(receivedPreActionChecks),
     };
   });

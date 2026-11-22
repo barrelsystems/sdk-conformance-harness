@@ -25,21 +25,32 @@ export const CreateAdapterResponse = Schema.Struct({ id: Schema.String });
 export const AdapterCommand = Schema.Union([
   Schema.Struct({ command: Schema.Literal("checkNow") }),
   Schema.Struct({ command: Schema.Literal("getAdapterState") }),
+  Schema.Struct({ command: Schema.Literal("getPolicy") }),
+  Schema.Struct({ command: Schema.Literal("getUpdaterActivity") }),
+  Schema.Struct({
+    command: Schema.Literal("prepareAction"),
+    stage: Schema.Literals(["pre-download", "pre-apply"]),
+  }),
   Schema.Struct({ command: Schema.Literal("getLastUpdateError") }),
   Schema.Struct({
     command: Schema.Literal("injectEvent"),
     eventName: Schema.String,
     payload: Schema.Unknown,
   }),
-  // Added for pre-action-check conformance coverage; not yet implemented
-  // by any real SDK's test service, so expect this to fail/decode-error
-  // there until each one adds it.
   Schema.Struct({
-    command: Schema.Literal("triggerPreActionCheck"),
+    command: Schema.Literal("runAction"),
     stage: Schema.Literals(["pre-download", "pre-apply"]),
   }),
 ]);
 export type AdapterCommand = typeof AdapterCommand.Type;
+
+/** Counts calls at the native updater boundary, including host-controlled actions. */
+export const UpdaterActivity = Schema.Struct({
+  checks: Schema.Number,
+  downloads: Schema.Number,
+  applies: Schema.Number,
+});
+export type UpdaterActivity = typeof UpdaterActivity.Type;
 
 /** Deliberately `Schema.Unknown`: each command's own result shape is
  * asserted by the scenario that issued the command, not constrained here. */

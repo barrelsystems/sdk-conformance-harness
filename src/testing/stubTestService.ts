@@ -1,12 +1,13 @@
 import { randomUUID, webcrypto } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Ref from "effect/Ref";
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { referenceJitterFraction } from "../protocol/jitter.js";
 import { TestServiceHttpApi } from "../protocol/testServiceApi.js";
-import type { AdapterState, CheckInResponse } from "../protocol/wireContract.js";
+import { Policy, type AdapterState, type CheckInResponse } from "../protocol/wireContract.js";
 import { serveHttpApiOnEphemeralPort } from "../harness/serveHttpApi.js";
 
 interface AdapterInstance {
@@ -14,6 +15,8 @@ interface AdapterInstance {
   readonly publicKeyPem: string;
   readonly channel: string;
   state: AdapterState;
+  policy: Policy | null;
+  activity: { checks: number; downloads: number; applies: number };
   readonly checkInInFlight: Ref.Ref<boolean>;
 }
 
@@ -49,7 +52,7 @@ function verifyPolicySignature(adapter: AdapterInstance, body: CheckInResponse) 
     if (!verified)
       return yield* Effect.die(new Error("stub test service: policy signature did not verify"));
 
-    return JSON.parse(body.policy) as { type: string };
+    return yield* Schema.decodeUnknownEffect(Policy)(JSON.parse(body.policy));
   });
 }
 
@@ -87,12 +90,12 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
       ),
     );
     const body = (yield* response.json) as CheckInResponse;
-    const policy = yield* verifyPolicySignature(adapter, body);
-
-    adapter.state = policy.type === "updateEligible" ? { type: "available" } : { type: "idle" };
+    adapter.activity.checks++;
+    adapter.policy = yield* verifyPolicySignature(adapter, body);
   }).pipe(
     // Fail-open: any failure here (network, decode, bad signature) leaves
     // `state` exactly as it was, never a crash or a surfaced error.
+    Effect.timeout("10 seconds"),
     Effect.catchCause(() => Effect.void),
     Effect.ensuring(Ref.set(adapter.checkInInFlight, false)),
   );
@@ -149,6 +152,8 @@ export function startStubTestService(
                 publicKeyPem: payload.publicKeyPem,
                 channel: payload.channel ?? "stable",
                 state: { type: "idle" },
+                policy: null,
+                activity: { checks: 0, downloads: 0, applies: 0 },
                 checkInInFlight,
               });
 
@@ -173,11 +178,30 @@ export function startStubTestService(
               return { result: null };
             }
 
-            if (payload.command === "triggerPreActionCheck") {
-              const policyType = yield* preActionCheck(adapter, payload.stage).pipe(Effect.orDie);
-
-              return { result: policyType };
+            if (payload.command === "getUpdaterActivity")
+              return { result: { ...adapter.activity } };
+            if (payload.command === "prepareAction") {
+              adapter.state = {
+                type: payload.stage === "pre-download" ? "available" : "downloaded",
+              };
+              return { result: null };
             }
+
+            if (payload.command === "runAction") {
+              const policyType = yield* preActionCheck(adapter, payload.stage).pipe(
+                Effect.timeout("10 seconds"),
+                Effect.catchCause(() => Effect.succeed("current")),
+              );
+
+              if (policyType !== "held") {
+                if (payload.stage === "pre-download") adapter.activity.downloads++;
+                else adapter.activity.applies++;
+              }
+
+              return { result: { ...adapter.activity } };
+            }
+
+            if (payload.command === "getPolicy") return { result: adapter.policy };
 
             return { result: payload.command === "getAdapterState" ? adapter.state : null };
           }).pipe(Effect.provide(FetchHttpClient.layer)),
