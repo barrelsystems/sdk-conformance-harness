@@ -71,6 +71,7 @@ export const CheckInRequest = Schema.Struct({
   eventId: Schema.String,
   checkedInAt: Schema.String,
   sdkVersion: Schema.String,
+  channel: Schema.String,
   observedVersion: Schema.String,
   platform: Schema.String,
   arch: Schema.String,

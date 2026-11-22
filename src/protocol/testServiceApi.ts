@@ -12,6 +12,8 @@ export const CreateAdapterRequest = Schema.Struct({
   checkInBaseUrl: Schema.String,
   publicKeyPem: Schema.String,
   variant: Schema.optionalKey(Schema.String),
+  /** Reported verbatim on check-in; omission uses the SDK default. */
+  channel: Schema.optionalKey(Schema.String),
 });
 export type CreateAdapterRequest = typeof CreateAdapterRequest.Type;
 
