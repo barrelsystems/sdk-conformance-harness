@@ -40,6 +40,12 @@ writes must leave observations responsive; failed writes must preserve memory
 and retry on the next change. Both settled and pending writes must recover the
 latest complete snapshot in a fresh process after the production exit hook.
 
+Native SDK unit tests own updater-event and error mappings: Electron emitter
+events, Tauri updater results and download callbacks, and Swift user-driver
+and delegate callbacks. They assert exact classifications, native identifiers,
+progress, cancellation, and last-error behavior. Shared scenarios assert the
+wire consequences, including exclusion of derived titles from buffered facts.
+
 No shared runtime code crosses the language boundary — only the protocol
 definitions in `src/protocol/` are the normative contract, independently
 re-implemented by each test service.
