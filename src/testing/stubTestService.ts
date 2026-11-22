@@ -12,6 +12,7 @@ import { serveHttpApiOnEphemeralPort } from "../harness/serveHttpApi.js";
 interface AdapterInstance {
   readonly checkInBaseUrl: string;
   readonly publicKeyPem: string;
+  readonly channel: string;
   state: AdapterState;
   readonly checkInInFlight: Ref.Ref<boolean>;
 }
@@ -75,7 +76,7 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
           eventId: randomUUID(),
           checkedInAt: new Date().toISOString(),
           sdkVersion: "0.0.0",
-          channel: "stable",
+          channel: adapter.channel,
           observedVersion: "0.0.0",
           platform: "test",
           arch: "test",
@@ -146,6 +147,7 @@ export function startStubTestService(
               next.set(id, {
                 checkInBaseUrl: payload.checkInBaseUrl,
                 publicKeyPem: payload.publicKeyPem,
+                channel: payload.channel ?? "stable",
                 state: { type: "idle" },
                 checkInInFlight,
               });
