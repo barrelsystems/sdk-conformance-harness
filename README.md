@@ -28,6 +28,12 @@ run in each SDK repo's own CI.
 Scenarios drive production cadence, download, and apply paths; counters at the
 native updater boundary verify which actions actually start. Pre-action checks
 must finish before either action starts and must preserve the cached Policy.
+Buffer scenarios exercise production stores, raw check-in payloads, and orderly
+process exit: adjacent merging, 32-entry priority eviction, title exclusion,
+concurrent writes, and clearing only the acknowledged snapshot. Blocked native
+writes must leave observations responsive; failed writes must preserve memory
+and retry on the next change. Both settled and pending writes must recover the
+latest complete snapshot in a fresh process after the production exit hook.
 
 No shared runtime code crosses the language boundary — only the protocol
 definitions in `src/protocol/` are the normative contract, independently

@@ -1,3 +1,4 @@
+import { AdapterState } from "./wireContract.js";
 import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 
@@ -19,10 +20,34 @@ export type CreateAdapterRequest = typeof CreateAdapterRequest.Type;
 
 export const CreateAdapterResponse = Schema.Struct({ id: Schema.String });
 
+export const FactObservation = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("adapterState"), state: AdapterState }),
+  Schema.Struct({ kind: Schema.Literal("updateError"), platformCode: Schema.String }),
+]);
+export type FactObservation = typeof FactObservation.Type;
+
 /** `injectEvent`'s `eventName`/`payload` stay untyped here because each
  * platform's raw event vocabulary differs; the per-platform scenario
  * carries the valid names/payloads for its own adapter library. */
 export const AdapterCommand = Schema.Union([
+  Schema.Struct({
+    command: Schema.Literal("recordFacts"),
+    facts: Schema.Array(FactObservation),
+    concurrent: Schema.Boolean,
+  }),
+  Schema.Struct({ command: Schema.Literal("getBufferedFacts") }),
+  Schema.Struct({ command: Schema.Literal("getPersistedBuffer") }),
+  Schema.Struct({ command: Schema.Literal("clearBuffer") }),
+  Schema.Struct({
+    command: Schema.Literal("setBufferPersistence"),
+    mode: Schema.Literals(["normal", "blocked", "failed"]),
+  }),
+  Schema.Struct({ command: Schema.Literal("getBufferPersistenceState") }),
+  Schema.Struct({
+    command: Schema.Literal("probeBufferExit"),
+    mode: Schema.Literals(["settled", "pending"]),
+    facts: Schema.Array(FactObservation),
+  }),
   Schema.Struct({ command: Schema.Literal("checkNow") }),
   Schema.Struct({ command: Schema.Literal("getAdapterState") }),
   Schema.Struct({ command: Schema.Literal("getPolicy") }),

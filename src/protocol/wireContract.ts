@@ -7,7 +7,10 @@ import * as Schema from "effect/Schema";
 export const AdapterState = Schema.Union([
   Schema.Struct({ type: Schema.Literal("idle") }),
   Schema.Struct({ type: Schema.Literal("checking") }),
-  Schema.Struct({ type: Schema.Literal("available") }),
+  Schema.Struct({
+    type: Schema.Literal("available"),
+    releaseNotes: Schema.optionalKey(Schema.String),
+  }),
   Schema.Struct({
     type: Schema.Literal("downloading"),
     progress: Schema.optionalKey(Schema.Number),
