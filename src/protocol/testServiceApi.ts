@@ -11,6 +11,11 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
  * each platform's own test service needs to. */
 export const CreateAdapterRequest = Schema.Struct({
   checkInBaseUrl: Schema.String,
+  attributes: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  debug: Schema.optionalKey(Schema.Boolean),
+  checkInIntervalMs: Schema.optionalKey(Schema.Number),
+  lifecycle: Schema.optionalKey(Schema.Boolean),
+  installationPersistence: Schema.optionalKey(Schema.Literal("failed")),
   publicKeyPem: Schema.String,
   variant: Schema.optionalKey(Schema.String),
   /** Reported verbatim on check-in; omission uses the SDK default. */
@@ -30,6 +35,13 @@ export type FactObservation = typeof FactObservation.Type;
  * platform's raw event vocabulary differs; the per-platform scenario
  * carries the valid names/payloads for its own adapter library. */
 export const AdapterCommand = Schema.Union([
+  Schema.Struct({ command: Schema.Literal("getCadenceState") }),
+  Schema.Struct({ command: Schema.Literal("restoreInstallationPersistence") }),
+  Schema.Struct({ command: Schema.Literal("getPersistedInstallationId") }),
+  Schema.Struct({
+    command: Schema.Literal("triggerLifecycle"),
+    event: Schema.Literals(["foreground", "resume"]),
+  }),
   Schema.Struct({
     command: Schema.Literal("recordFacts"),
     facts: Schema.Array(FactObservation),

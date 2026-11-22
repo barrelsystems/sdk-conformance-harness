@@ -11,6 +11,7 @@ import { DEFAULT_TRACKED_RUNS } from "./harness/relegationHistory.js";
 import { runAllScenarios } from "./harness/runAll.js";
 import type { Scenario } from "./harness/scenario.js";
 import { connectToTestService } from "./harness/testServiceClient.js";
+import { cadenceResilienceScenarios } from "./scenarios/cadenceResilience.js";
 import { bufferedFactsScenarios } from "./scenarios/bufferedFacts.js";
 import { happyPathCheckIn } from "./scenarios/happyPathCheckIn.js";
 import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
@@ -24,6 +25,7 @@ import { resilienceScenarios } from "./scenarios/resilience.js";
 const CHECK_IN_SCENARIOS: ReadonlyArray<Scenario> = [
   happyPathCheckIn,
   ...resilienceScenarios,
+  ...cadenceResilienceScenarios,
   ...policyScenarios,
   ...bufferedFactsScenarios,
   ...preActionCheckScenarios,
