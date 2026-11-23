@@ -32,6 +32,19 @@ describe("readHistory", () => {
     expect(readHistory(path)).toEqual({ scenarios: {} });
   });
 
+  it.each([
+    { scenarios: null },
+    { scenarios: [] },
+    { scenarios: { a: { outcomes: 42 } } },
+    { scenarios: { a: { outcomes: [true, "false"] } } },
+  ])("rejects invalid nested history: %j", (value) => {
+    const path = join(dir, "invalid-shape.json");
+    writeFileSync(path, JSON.stringify(value));
+    const history = readHistory(path);
+    expect(history).toEqual({ scenarios: {} });
+    expect(() => recordOutcomes(history, [{ name: "a", passed: true }], 5)).not.toThrow();
+  });
+
   it("round-trips through writeHistory", () => {
     const path = join(dir, "history.json");
     const history: RunHistory = { scenarios: { "scenario a": { outcomes: [true, false] } } };

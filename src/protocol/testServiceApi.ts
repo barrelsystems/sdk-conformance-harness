@@ -1,4 +1,4 @@
-import { AdapterState } from "./wireContract.js";
+import { UpdateState } from "./wireContract.js";
 import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 
@@ -6,9 +6,6 @@ import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
  * small standalone HTTP service. This file is the one normative definition;
  * each language's own test service implements the same wire shape independently. */
 
-/** `variant` lets a test service wrapping more than one underlying
- * adapter choose which one a scenario exercises -- interpreted however
- * each platform's own test service needs to. */
 export const CreateAdapterRequest = Schema.Struct({
   checkInBaseUrl: Schema.String,
   attributes: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -17,7 +14,6 @@ export const CreateAdapterRequest = Schema.Struct({
   lifecycle: Schema.optionalKey(Schema.Boolean),
   installationPersistence: Schema.optionalKey(Schema.Literal("failed")),
   publicKeyPem: Schema.String,
-  variant: Schema.optionalKey(Schema.String),
   /** Reported verbatim on check-in; omission uses the SDK default. */
   channel: Schema.optionalKey(Schema.String),
 });
@@ -26,14 +22,11 @@ export type CreateAdapterRequest = typeof CreateAdapterRequest.Type;
 export const CreateAdapterResponse = Schema.Struct({ id: Schema.String });
 
 export const FactObservation = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("adapterState"), state: AdapterState }),
+  Schema.Struct({ kind: Schema.Literal("lifecycleState"), state: UpdateState }),
   Schema.Struct({ kind: Schema.Literal("updateError"), platformCode: Schema.String }),
 ]);
 export type FactObservation = typeof FactObservation.Type;
 
-/** `injectEvent`'s `eventName`/`payload` stay untyped here because each
- * platform's raw event vocabulary differs; the per-platform scenario
- * carries the valid names/payloads for its own adapter library. */
 export const AdapterCommand = Schema.Union([
   Schema.Struct({ command: Schema.Literal("getCadenceState") }),
   Schema.Struct({ command: Schema.Literal("restoreInstallationPersistence") }),
@@ -61,19 +54,15 @@ export const AdapterCommand = Schema.Union([
     facts: Schema.Array(FactObservation),
   }),
   Schema.Struct({ command: Schema.Literal("checkNow") }),
-  Schema.Struct({ command: Schema.Literal("getAdapterState") }),
-  Schema.Struct({ command: Schema.Literal("getPolicy") }),
+  Schema.Struct({ command: Schema.Literal("getUpdateState") }),
+  Schema.Struct({ command: Schema.Literal("getUpdateEligibility") }),
   Schema.Struct({ command: Schema.Literal("getUpdaterActivity") }),
   Schema.Struct({
     command: Schema.Literal("prepareAction"),
     stage: Schema.Literals(["pre-download", "pre-apply"]),
   }),
   Schema.Struct({ command: Schema.Literal("getLastUpdateError") }),
-  Schema.Struct({
-    command: Schema.Literal("injectEvent"),
-    eventName: Schema.String,
-    payload: Schema.Unknown,
-  }),
+  Schema.Struct({ command: Schema.Literal("prepareUpdaterFailure") }),
   Schema.Struct({
     command: Schema.Literal("runAction"),
     stage: Schema.Literals(["pre-download", "pre-apply"]),
@@ -93,9 +82,7 @@ export type UpdaterActivity = typeof UpdaterActivity.Type;
  * asserted by the scenario that issued the command, not constrained here. */
 export const AdapterCommandResponse = Schema.Struct({ result: Schema.Unknown });
 
-/** `supportsCheckIn` lets the CLI skip check-in-dependent scenarios (like
- * the happy-path check-in) against a test service that only implements
- * `injectEvent`-driven conformance -- a real, not a hypothetical, gap. */
+/** Reject services without the required check-in capability rather than silently skipping conformance scenarios. */
 export const Capabilities = Schema.Struct({
   sdkName: Schema.String,
   sdkVersion: Schema.String,

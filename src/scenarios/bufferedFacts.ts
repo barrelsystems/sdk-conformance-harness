@@ -1,14 +1,14 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import type { Scenario, ScenarioContext } from "../harness/scenario.js";
+import type { Scenario, ScenarioContext } from "../runner/scenario.js";
 import type { FactObservation } from "../protocol/testServiceApi.js";
-import { AdapterState } from "../protocol/wireContract.js";
-import { withPolicyAdapter, type AdapterCommands } from "./policy.js";
+import { UpdateState } from "../protocol/wireContract.js";
+import { withAdapter, type AdapterCommands } from "../fixtures/adapterFixture.js";
 
 const StoredFact = Schema.Struct({
-  kind: Schema.Literals(["adapterState", "updateError"]),
-  state: Schema.optionalKey(AdapterState),
+  kind: Schema.Literals(["lifecycleState", "updateError"]),
+  state: Schema.optionalKey(UpdateState),
   failure: Schema.optionalKey(Schema.Struct({ platformCode: Schema.String })),
   firstObservedAt: Schema.String,
   lastObservedAt: Schema.String,
@@ -30,12 +30,12 @@ function record(
   return command({ command: "recordFacts", facts, concurrent: options.concurrent ?? false });
 }
 
-function state(type: "checking" | "downloaded" | "update-cancelled"): FactObservation {
-  return { kind: "adapterState", state: { type } };
+function state(type: "idle" | "downloaded" | "update-cancelled"): FactObservation {
+  return { kind: "lifecycleState", state: { type } };
 }
 
 function progress(value: number): FactObservation {
-  return { kind: "adapterState", state: { type: "downloading", progress: value } };
+  return { kind: "lifecycleState", state: { type: "downloading", progress: value } };
 }
 
 function failure(code: string): FactObservation {
@@ -53,7 +53,7 @@ function withBuffer(
       environment: "test",
     });
     yield* context.backend.setNextResponse({ protocolVersion: 1, ...signed });
-    yield* withPolicyAdapter(context, (command) =>
+    yield* withAdapter(context, (command) =>
       Effect.gen(function* () {
         yield* command({ command: "checkNow" });
         yield* command({ command: "clearBuffer" });
@@ -76,23 +76,23 @@ function assertPersisted(command: AdapterCommands) {
   });
 }
 
-export const bufferMerge: Scenario = {
+const bufferMerge: Scenario = {
   name: "only adjacent identical facts merge; progress and intervening observations remain distinct",
   tier: 1,
   run: (context) =>
     withBuffer(context, (command) =>
       Effect.gen(function* () {
-        yield* record(command, [state("checking")]);
+        yield* record(command, [state("downloaded")]);
         const first = (yield* readFacts(command))[0];
         ok(first);
 
         // Cross the coarsest SDK timestamp resolution: one second.
         yield* Effect.sleep("1100 millis");
         yield* record(command, [
-          state("checking"),
+          state("downloaded"),
           progress(10),
           progress(20),
-          state("checking"),
+          state("downloaded"),
           failure("repeat"),
           failure("repeat"),
         ]);
@@ -110,7 +110,7 @@ export const bufferMerge: Scenario = {
         ok(Date.parse(merged.lastObservedAt) > Date.parse(first.lastObservedAt));
         deepStrictEqual(
           facts.map((fact) => fact.state?.type ?? fact.failure?.platformCode),
-          ["checking", "downloading", "downloading", "checking", "repeat"],
+          ["downloaded", "downloading", "downloading", "downloaded", "repeat"],
         );
         const mergedError = facts[4];
         ok(mergedError);
@@ -118,8 +118,8 @@ export const bufferMerge: Scenario = {
         strictEqual(mergedError.firstObservedAt, firstError.firstObservedAt);
         ok(Date.parse(mergedError.lastObservedAt) > Date.parse(firstError.lastObservedAt));
         yield* record(command, [
-          { kind: "adapterState", state: { type: "available", releaseNotes: "first notes" } },
-          { kind: "adapterState", state: { type: "available", releaseNotes: "second notes" } },
+          { kind: "lifecycleState", state: { type: "available", releaseNotes: "first notes" } },
+          { kind: "lifecycleState", state: { type: "available", releaseNotes: "second notes" } },
         ]);
         strictEqual((yield* readFacts(command)).length, 7);
         yield* assertPersisted(command);
@@ -141,7 +141,7 @@ export const bufferMerge: Scenario = {
     ),
 };
 
-export const bufferEviction: Scenario = {
+const bufferEviction: Scenario = {
   name: "the 32-fact bound preserves terminal facts and evicts the oldest equal-priority observation",
   tier: 1,
   run: (context) =>
@@ -181,7 +181,7 @@ export const bufferEviction: Scenario = {
           state("downloaded"),
           state("update-cancelled"),
           {
-            kind: "adapterState",
+            kind: "lifecycleState",
             state: {
               type: "failed",
               category: "download",
@@ -203,7 +203,7 @@ export const bufferEviction: Scenario = {
     ),
 };
 
-export const bufferAcknowledgment: Scenario = {
+const bufferAcknowledgment: Scenario = {
   name: "failed and delayed check-ins preserve facts; acknowledgment clears only the sent snapshot",
   tier: 1,
   run: (context) =>
@@ -250,7 +250,7 @@ export const bufferAcknowledgment: Scenario = {
     ),
 };
 
-export const bufferConcurrentWrites: Scenario = {
+const bufferConcurrentWrites: Scenario = {
   name: "concurrent observations persist the complete buffer without derived titles",
   tier: 1,
   run: (context) =>
@@ -269,7 +269,7 @@ export const bufferConcurrentWrites: Scenario = {
     ),
 };
 
-export const bufferProcessExit: Scenario = {
+const bufferProcessExit: Scenario = {
   name: "a real process exit restores the latest buffer through the production synchronous exit hook",
   tier: 1,
   run: (context) =>
@@ -295,14 +295,14 @@ export const bufferProcessExit: Scenario = {
     ),
 };
 
-export const bufferBlockedWrites: Scenario = {
+const bufferBlockedWrites: Scenario = {
   name: "blocked disk writes leave observations responsive and persist the latest complete snapshot",
   tier: 1,
   run: (context) =>
     withBuffer(context, (command) =>
       Effect.gen(function* () {
         yield* command({ command: "setBufferPersistence", mode: "blocked" });
-        yield* record(command, [state("checking")]).pipe(Effect.timeout("2 seconds"));
+        yield* record(command, [state("idle")]).pipe(Effect.timeout("2 seconds"));
         let blocked = false;
 
         for (let attempt = 0; attempt < 100; attempt++) {
@@ -334,7 +334,7 @@ export const bufferBlockedWrites: Scenario = {
     ),
 };
 
-export const bufferFailedWrites: Scenario = {
+const bufferFailedWrites: Scenario = {
   name: "failed native writes preserve memory and the next observation retries the complete snapshot",
   tier: 1,
   run: (context) =>
@@ -355,7 +355,7 @@ export const bufferFailedWrites: Scenario = {
     ),
 };
 
-export const bufferPendingExit: Scenario = {
+const bufferPendingExit: Scenario = {
   name: "orderly exit with a blocked pending write recovers the latest complete buffer in a fresh process",
   tier: 1,
   run: (context) =>
@@ -364,7 +364,7 @@ export const bufferPendingExit: Scenario = {
         const result = yield* command({
           command: "probeBufferExit",
           mode: "pending",
-          facts: [state("checking"), state("downloaded"), failure("pending-exit")],
+          facts: [state("idle"), state("downloaded"), failure("pending-exit")],
         }).pipe(Effect.timeout("20 seconds"));
         ok(!JSON.stringify(result).includes('"title"'));
         const saved = yield* Schema.decodeUnknownEffect(

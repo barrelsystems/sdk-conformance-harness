@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import type { EquivalenceCheck } from "../harness/equivalence.js";
+import type { EquivalenceCheck } from "../runner/equivalence.js";
 
 /** The one check in this harness that asserts true numeric equality, not
  * "reasonable behavior" -- the spec requires the jitter fraction to be a

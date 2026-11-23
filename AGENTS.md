@@ -4,7 +4,7 @@ State a rule here only if it's short and always relevant. Push anything
 longer or conditional to a pointed-to doc. This repo is published publicly —
 never add a reference here (or anywhere else in this repo) to internal
 tooling, ticket IDs, team names, or a non-public sibling repo's name/path
-(`infrastructure`, the Home Repo). The other public repos in this SDK family
+(including private workspace paths). The other public repos in this SDK family
 (sdk-electron/sdk-tauri/sdk-swift/sdk-conformance-harness) may be referenced
 where structurally necessary — a dependency, a CI job driving the
 conformance harness.
@@ -33,6 +33,9 @@ each explanation self-contained. A comment is at most 3 lines.
 
 Named, top-level functions are `function` declarations, not arrow functions
 assigned to `const`. Arrow functions are for callbacks and inline handlers.
+
+Use a `const` arrow when capturing a value narrowed earlier in the same scope;
+a hoisted function declaration loses that narrowing.
 
 ## Function arguments
 

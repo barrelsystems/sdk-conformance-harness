@@ -7,15 +7,21 @@ import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effe
 import { HttpApiBuilder } from "effect/http-api";
 import { referenceJitterFraction } from "../protocol/jitter.js";
 import { TestServiceHttpApi } from "../protocol/testServiceApi.js";
-import { Policy, type AdapterState, type CheckInResponse } from "../protocol/wireContract.js";
-import { serveHttpApiOnEphemeralPort } from "../harness/serveHttpApi.js";
+import {
+  UpdateEligibility,
+  type UpdateState,
+  type CheckInResponse,
+} from "../protocol/wireContract.js";
+import { serveHttpApiOnEphemeralPort } from "../fixtures/serveHttpApi.js";
 
 interface AdapterInstance {
+  readonly installationId: string;
   readonly checkInBaseUrl: string;
   readonly publicKeyPem: string;
   readonly channel: string;
-  state: AdapterState;
-  policy: Policy | null;
+  readonly credential: string;
+  state: UpdateState;
+  updateEligibility: UpdateEligibility | null;
   activity: { checks: number; downloads: number; applies: number };
   readonly checkInInFlight: Ref.Ref<boolean>;
 }
@@ -27,9 +33,9 @@ function pemToDer(pem: string): Uint8Array {
 }
 
 /** Shared by `checkNow` and `preActionCheck` below -- both get back a
- * signed `Policy` the same way and must reject it identically on a bad
- * signature, so the verify step lives in one place. */
-function verifyPolicySignature(adapter: AdapterInstance, body: CheckInResponse) {
+ * signed `UpdateEligibility` the same way and must reject it identically on
+ * a bad signature, so the verify step lives in one place. */
+function verifyUpdateEligibilitySignature(adapter: AdapterInstance, body: CheckInResponse) {
   return Effect.gen(function* () {
     const key = yield* Effect.promise(() =>
       webcrypto.subtle.importKey(
@@ -45,14 +51,16 @@ function verifyPolicySignature(adapter: AdapterInstance, body: CheckInResponse) 
         "Ed25519",
         key,
         Uint8Array.from(Buffer.from(body.signature, "base64")),
-        new TextEncoder().encode(body.policy),
+        new TextEncoder().encode(body.updateEligibility),
       ),
     );
 
     if (!verified)
-      return yield* Effect.die(new Error("stub test service: policy signature did not verify"));
+      return yield* Effect.die(
+        new Error("stub test service: update-eligibility signature did not verify"),
+      );
 
-    return yield* Schema.decodeUnknownEffect(Policy)(JSON.parse(body.policy));
+    return yield* Schema.decodeUnknownEffect(UpdateEligibility)(JSON.parse(body.updateEligibility));
   });
 }
 
@@ -72,10 +80,10 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
     const client = yield* HttpClient.HttpClient;
     const response = yield* client.execute(
       HttpClientRequest.post(`${adapter.checkInBaseUrl}/check-in`).pipe(
-        HttpClientRequest.setHeader("authorization", "Bearer test"),
+        HttpClientRequest.setHeader("authorization", `Bearer ${adapter.credential}`),
         HttpClientRequest.bodyJsonUnsafe({
           protocolVersion: 1,
-          installationId: "stub-installation",
+          installationId: adapter.installationId,
           eventId: randomUUID(),
           checkedInAt: new Date().toISOString(),
           sdkVersion: "0.0.0",
@@ -85,13 +93,16 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
           arch: "test",
           osVersion: "test",
           attributes: {},
-          adapterState: adapter.state,
+          bufferedFacts: [],
+          checkInIntervalMs: 1_800_000,
+          lifecycleState: adapter.state,
         }),
       ),
     );
     const body = (yield* response.json) as CheckInResponse;
-    adapter.activity.checks++;
-    adapter.policy = yield* verifyPolicySignature(adapter, body);
+    if (["idle", "failed", "update-cancelled"].includes(adapter.state.type))
+      adapter.activity.checks++;
+    adapter.updateEligibility = yield* verifyUpdateEligibilitySignature(adapter, body);
   }).pipe(
     // Fail-open: any failure here (network, decode, bad signature) leaves
     // `state` exactly as it was, never a crash or a surfaced error.
@@ -101,9 +112,7 @@ const checkNow = Effect.fn("stubTestService.checkNow")(function* (adapter: Adapt
   );
 });
 
-/** Mirrors `checkNow`'s request/verify shape against `/pre-action-check`
- * instead of `/check-in`. An ephemeral gate check, not a state sync --
- * it reports the resolved policy's `type` but never mutates `adapter.state`. */
+/** The pre-action endpoint verifies a fresh decision without replacing the periodic check-in workflow. */
 const preActionCheck = Effect.fn("stubTestService.preActionCheck")(function* (
   adapter: AdapterInstance,
   stage: "pre-download" | "pre-apply",
@@ -111,33 +120,40 @@ const preActionCheck = Effect.fn("stubTestService.preActionCheck")(function* (
   const client = yield* HttpClient.HttpClient;
   const response = yield* client.execute(
     HttpClientRequest.post(`${adapter.checkInBaseUrl}/pre-action-check`).pipe(
-      HttpClientRequest.setHeader("authorization", "Bearer test"),
+      HttpClientRequest.setHeader("authorization", `Bearer ${adapter.credential}`),
       HttpClientRequest.bodyJsonUnsafe({
         protocolVersion: 1,
-        installationId: "stub-installation",
+        installationId: adapter.installationId,
         stage,
       }),
     ),
   );
   const body = (yield* response.json) as CheckInResponse;
-  const policy = yield* verifyPolicySignature(adapter, body);
+  const updateEligibility = yield* verifyUpdateEligibilitySignature(adapter, body);
 
-  return policy.type;
+  adapter.updateEligibility = updateEligibility;
+  return updateEligibility.type;
 });
 
 /** Caller provides a `Scope` spanning however long this stub must stay
  * listening. `computeJitterFraction` defaults to the real reference
  * algorithm; tests pass a wrong one to prove drift gets caught. */
-export function startStubTestService(
-  computeJitterFraction: (installationId: string) => number = referenceJitterFraction,
-) {
+export function startStubTestService({
+  computeJitterFraction = referenceJitterFraction,
+  sdkName = "stub",
+  credential = "test-service",
+}: {
+  computeJitterFraction?: (installationId: string) => number;
+  sdkName?: string;
+  credential?: string;
+} = {}) {
   return Effect.gen(function* () {
     const adapters = yield* Ref.make<Map<string, AdapterInstance>>(new Map());
 
     const GroupLayer = HttpApiBuilder.group(TestServiceHttpApi, "testService", (handlers) =>
       handlers
         .handle("capabilities", () =>
-          Effect.succeed({ sdkName: "stub", sdkVersion: "0.0.0", supportsCheckIn: true }),
+          Effect.succeed({ sdkName, sdkVersion: "0.0.0", supportsCheckIn: true }),
         )
         .handle("createAdapter", ({ payload }) =>
           Effect.gen(function* () {
@@ -148,11 +164,13 @@ export function startStubTestService(
               const next = new Map(map);
 
               next.set(id, {
+                installationId: randomUUID(),
                 checkInBaseUrl: payload.checkInBaseUrl,
                 publicKeyPem: payload.publicKeyPem,
                 channel: payload.channel ?? "stable",
+                credential,
                 state: { type: "idle" },
-                policy: null,
+                updateEligibility: null,
                 activity: { checks: 0, downloads: 0, applies: 0 },
                 checkInInFlight,
               });
@@ -188,12 +206,12 @@ export function startStubTestService(
             }
 
             if (payload.command === "runAction") {
-              const policyType = yield* preActionCheck(adapter, payload.stage).pipe(
+              const eligibilityType = yield* preActionCheck(adapter, payload.stage).pipe(
                 Effect.timeout("10 seconds"),
-                Effect.catchCause(() => Effect.succeed("current")),
+                Effect.catchCause(() => Effect.succeed("unrestricted")),
               );
 
-              if (policyType !== "held") {
+              if (eligibilityType !== "held") {
                 if (payload.stage === "pre-download") adapter.activity.downloads++;
                 else adapter.activity.applies++;
               }
@@ -201,9 +219,15 @@ export function startStubTestService(
               return { result: { ...adapter.activity } };
             }
 
-            if (payload.command === "getPolicy") return { result: adapter.policy };
+            if (payload.command === "getUpdateEligibility")
+              return { result: adapter.updateEligibility };
 
-            return { result: payload.command === "getAdapterState" ? adapter.state : null };
+            if (payload.command === "getUpdateState") return { result: adapter.state };
+            if (payload.command === "getLastUpdateError") return { result: null };
+
+            return yield* Effect.die(
+              new Error(`stub test service: unsupported command ${payload.command}`),
+            );
           }).pipe(Effect.provide(FetchHttpClient.layer)),
         )
         .handle("destroyAdapter", ({ params }) =>
