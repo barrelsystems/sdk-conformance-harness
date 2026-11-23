@@ -1,10 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import * as Schema from "effect/Schema";
 
 /** How many of a scenario's most recent runs count toward "sustained
  * regression" -- one bad run is noise; this many straight is a pattern. */
 export const DEFAULT_TRACKED_RUNS = 5;
 
-export interface ScenarioHistory {
+interface ScenarioHistory {
   readonly outcomes: ReadonlyArray<boolean>;
 }
 
@@ -12,14 +13,9 @@ export interface RunHistory {
   readonly scenarios: Readonly<Record<string, ScenarioHistory>>;
 }
 
-export const EMPTY_HISTORY: RunHistory = { scenarios: {} };
+const EMPTY_HISTORY: RunHistory = { scenarios: {} };
 
-/** Reads the run-history file at `path`. Both a missing file (the first
- * run in a fresh checkout) and a malformed one are treated as empty
- * history -- corrupt or absent history should never crash a run. */
-// Known limitation: this read and its matching `writeHistory` are an
-// unsynchronized read-modify-write pair. Concurrent invocations sharing
-// one history file (a CI matrix, retries) can race and silently lose updates.
+/** Missing, malformed or invalidly shaped history starts empty. Concurrent writers must use separate history paths. */
 export function readHistory(path: string): RunHistory {
   if (!existsSync(path)) return EMPTY_HISTORY;
 
@@ -39,10 +35,7 @@ export function writeHistory(path: string, history: RunHistory): void {
   writeFileSync(path, `${JSON.stringify(history, null, 2)}\n`);
 }
 
-/** Appends this run's pass/fail outcome for every scenario, capping each
- * scenario's own tracked outcomes at `maxRuns` (oldest dropped first). Any
- * key not present in this run's `results` is dropped, so a renamed or
- * removed scenario's orphaned history doesn't linger indefinitely. */
+/** Append bounded recent outcomes and discard entries for scenarios absent from this run. */
 export function recordOutcomes(
   history: RunHistory,
   results: ReadonlyArray<{ readonly name: string; readonly passed: boolean }>,
@@ -59,10 +52,7 @@ export function recordOutcomes(
   return { scenarios };
 }
 
-/** A tier-1 scenario relegates to tier 2 once it has `minRuns` recorded
- * outcomes and every single one of them failed -- sustained regression,
- * not one bad run. Fewer than `minRuns` recorded outcomes never relegates,
- * even if all of them so far failed. */
+/** Relegate only after a full window of consecutive failures; a partial history never meets the threshold. */
 export function scenariosToRelegate(
   history: RunHistory,
   tier1Names: ReadonlyArray<string>,
@@ -75,11 +65,11 @@ export function scenariosToRelegate(
   });
 }
 
-function isRunHistory(value: unknown): value is RunHistory {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "scenarios" in value &&
-    typeof (value as { scenarios: unknown }).scenarios === "object"
-  );
-}
+const History = Schema.Struct({
+  scenarios: Schema.Record(
+    Schema.String,
+    Schema.Struct({ outcomes: Schema.Array(Schema.Boolean) }),
+  ),
+});
+
+const isRunHistory = Schema.is(History);

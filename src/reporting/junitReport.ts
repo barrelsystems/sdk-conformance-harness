@@ -1,5 +1,5 @@
-/** Hand-rolled, not library-sourced -- the format is small and stable
- * enough that no renowned library for it is worth a dependency. */
+import * as Cause from "effect/Cause";
+
 export interface JUnitCase {
   readonly suiteName: string;
   readonly name: string;
@@ -17,7 +17,12 @@ export function toJUnitCase(options: {
 }): JUnitCase {
   const { suiteName, name, passed, error } = options;
 
-  return { suiteName, name, passed, ...(!passed && { failureMessage: String(error) }) };
+  return {
+    suiteName,
+    name,
+    passed,
+    ...(!passed && { failureMessage: Cause.isCause(error) ? Cause.pretty(error) : String(error) }),
+  };
 }
 
 function escapeXml(value: string): string {
@@ -42,13 +47,13 @@ function groupBySuite(cases: ReadonlyArray<JUnitCase>): Map<string, Array<JUnitC
 }
 
 function renderTestCase(testCase: JUnitCase): string {
-  if (testCase.passed || !testCase.failureMessage) {
+  if (testCase.passed) {
     return `    <testcase name="${escapeXml(testCase.name)}" classname="${escapeXml(testCase.suiteName)}" />`;
   }
 
   return [
     `    <testcase name="${escapeXml(testCase.name)}" classname="${escapeXml(testCase.suiteName)}">`,
-    `      <failure message="${escapeXml(testCase.failureMessage)}" />`,
+    `      <failure message="${escapeXml(testCase.failureMessage || "Scenario failed without a diagnostic")}" />`,
     `    </testcase>`,
   ].join("\n");
 }

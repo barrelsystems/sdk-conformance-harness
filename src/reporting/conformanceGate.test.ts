@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyRelegations, tier2PassRateBelowThreshold } from "./conformanceGate.js";
 import { readHistory } from "./relegationHistory.js";
-import type { ScenarioResult } from "./runAll.js";
+import type { ScenarioResult } from "../runner/runAll.js";
 
 let dir: string;
 

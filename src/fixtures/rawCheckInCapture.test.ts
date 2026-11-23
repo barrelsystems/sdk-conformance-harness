@@ -5,11 +5,15 @@ import { startMockBackend } from "./mockBackend.js";
 it("retains raw check-in fields that schema decoding would otherwise strip", () =>
   Effect.gen(function* () {
     const backend = yield* startMockBackend();
-    yield* backend.setNextResponse({ protocolVersion: 1, policy: "{}", signature: "test" });
+    yield* backend.setNextResponse({
+      protocolVersion: 1,
+      updateEligibility: "{}",
+      signature: "test",
+    });
     const request = {
       protocolVersion: 1,
-      installationId: "test",
-      eventId: "test",
+      installationId: "00000000-0000-4000-8000-000000000001",
+      eventId: "00000000-0000-4000-8000-000000000002",
       checkedInAt: new Date().toISOString(),
       sdkVersion: "test",
       observedVersion: "test",
@@ -18,7 +22,7 @@ it("retains raw check-in fields that schema decoding would otherwise strip", () 
       arch: "test",
       osVersion: "test",
       attributes: {},
-      adapterState: { type: "idle" },
+      lifecycleState: { type: "idle" },
       bufferedFacts: [
         {
           kind: "updateError",

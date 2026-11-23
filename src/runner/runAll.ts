@@ -1,9 +1,9 @@
 import * as Effect from "effect/Effect";
 import { FetchHttpClient } from "effect/http";
 import { generateTestKeypair } from "../protocol/signing.js";
-import { startMockBackend } from "./mockBackend.js";
+import { startMockBackend } from "../fixtures/mockBackend.js";
 import type { Scenario } from "./scenario.js";
-import { connectToTestService } from "./testServiceClient.js";
+import { connectToTestService } from "../fixtures/testServiceClient.js";
 
 export interface ScenarioResult {
   readonly name: string;

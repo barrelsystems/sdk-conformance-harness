@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vitest";
 import { renderJUnitXml, toJUnitCase } from "./junitReport.js";
 
@@ -53,5 +54,27 @@ describe("renderJUnitXml", () => {
     ]);
 
     expect(xml).not.toContain("<failure");
+  });
+  it.each(["", undefined])("keeps a failed case failed without a diagnostic: %s", (error) => {
+    const xml = renderJUnitXml([
+      toJUnitCase({ suiteName: "sdk", name: "failure", passed: false, error }),
+    ]);
+
+    expect(xml).toContain('failures="1"');
+    expect(xml).toContain("<failure ");
+  });
+
+  it("retains assertion diagnostics from the runner's Effect cause", async () => {
+    const exit = await Effect.runPromise(Effect.exit(Effect.die(new Error("held action ran"))));
+
+    if (exit._tag !== "Failure") throw new Error("expected a failed effect");
+
+    const testCase = toJUnitCase({
+      suiteName: "sdk",
+      name: "hold",
+      passed: false,
+      error: exit.cause,
+    });
+    expect(testCase.failureMessage).toContain("held action ran");
   });
 });

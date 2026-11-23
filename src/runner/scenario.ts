@@ -2,12 +2,12 @@ import type * as Effect from "effect/Effect";
 import type { HttpApiClient } from "effect/http-api";
 import type { TestServiceHttpApi } from "../protocol/testServiceApi.js";
 import type { TestKeypair } from "../protocol/signing.js";
-import type { MockBackendHandle } from "./mockBackend.js";
+import type { MockBackendHandle } from "../fixtures/mockBackend.js";
 
-export type TestServiceClient = HttpApiClient.ForApi<typeof TestServiceHttpApi>;
+type TestServiceClient = HttpApiClient.ForApi<typeof TestServiceHttpApi>;
 
 /** What every scenario's `run` is handed -- pulled out as its own type so
- * a scenario-building helper (e.g. `adapterConformance.ts`) can name it
+ * a scenario-building helper can name it
  * directly instead of re-deriving or re-inlining this shape. */
 export interface ScenarioContext {
   readonly backend: MockBackendHandle;

@@ -1,17 +1,13 @@
+import { waitForCheckIns, waitForIdle, readState } from "../fixtures/runtimeAssertions.js";
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
-import type { Scenario, ScenarioContext } from "../harness/scenario.js";
+import type { Scenario, ScenarioContext } from "../runner/scenario.js";
 import type { AdapterCommand, CreateAdapterRequest } from "../protocol/testServiceApi.js";
-import { withPolicyAdapter } from "./policy.js";
+import { updaterActivity, withAdapter as withRuntimeAdapter } from "../fixtures/adapterFixture.js";
+
+import { applyingStateSync } from "./preActionCheck.js";
 import { referenceJitterFraction } from "../protocol/jitter.js";
 
-const CadenceState = Schema.Struct({
-  intervalMs: Schema.NullOr(Schema.Number),
-  inFlight: Schema.Boolean,
-  logs: Schema.Array(Schema.String),
-  lifecycleEvents: Schema.Array(Schema.Literals(["foreground", "resume"])),
-});
 type Command = (payload: AdapterCommand) => Effect.Effect<unknown, unknown>;
 
 function withAdapter(
@@ -26,40 +22,11 @@ function withAdapter(
       environment: "test",
     });
     yield* context.backend.setNextResponse({ protocolVersion: 1, ...signed });
-    yield* withPolicyAdapter(context, run, config);
+    yield* withRuntimeAdapter(context, run, config);
   });
 }
 
-function waitForCheckIns(context: ScenarioContext, count: number) {
-  return Effect.gen(function* () {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      const received = yield* context.backend.receivedCheckIns();
-      if (received.length >= count) return received;
-
-      yield* Effect.sleep("20 millis");
-    }
-
-    return yield* Effect.die(new Error(`expected ${count} production check-ins`));
-  });
-}
-
-function readState(command: Command) {
-  return command({ command: "getCadenceState" }).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(CadenceState)),
-  );
-}
-
-function waitForIdle(command: Command) {
-  return Effect.gen(function* () {
-    for (let attempt = 0; attempt < 200; attempt++) {
-      if (!(yield* readState(command)).inFlight) return;
-      yield* Effect.sleep("20 millis");
-    }
-    return yield* Effect.die(new Error("cadence did not become idle"));
-  });
-}
-
-export const boundedAttributes: Scenario = {
+const boundedAttributes: Scenario = {
   name: "production check-ins bound attribute keys and UTF-8 value bytes without corrupting text",
   tier: 1,
   run: (context) =>
@@ -94,7 +61,7 @@ export const boundedAttributes: Scenario = {
     }),
 };
 
-export const installationPersistenceRecovery: Scenario = {
+const installationPersistenceRecovery: Scenario = {
   name: "failed installation-ID persistence retries the same runtime ID once storage recovers",
   tier: 1,
   run: (context) =>
@@ -125,8 +92,8 @@ export const installationPersistenceRecovery: Scenario = {
     ),
 };
 
-export const cadenceIntervalAndDebug: Scenario = {
-  name: "native scheduling clamps the interval floor and debug output is opt-in",
+const cadenceIntervalAndDebug: Scenario = {
+  name: "native scheduling clamps cadence bounds and reports the nominal interval independently of jitter",
   tier: 1,
   run: (context) =>
     Effect.gen(function* () {
@@ -135,6 +102,8 @@ export const cadenceIntervalAndDebug: Scenario = {
         { checkInIntervalMs: 1, debug: false },
         { checkInIntervalMs: 1, debug: true },
         { checkInIntervalMs: 3_600_000, debug: true },
+        { checkInIntervalMs: 7_200_000, debug: true },
+        { checkInIntervalMs: 21_600_000, debug: true },
       ]) {
         const count = (yield* context.backend.receivedCheckIns()).length;
         yield* withAdapter(context, { ...config, lifecycle: true }, (command) =>
@@ -144,11 +113,12 @@ export const cadenceIntervalAndDebug: Scenario = {
             ok(id);
             const state = yield* readState(command);
             ok(state.intervalMs !== null);
-            const expected =
-              Math.max(900_000, config.checkInIntervalMs) * (1 + referenceJitterFraction(id));
+            const nominal = Math.min(7_200_000, Math.max(900_000, config.checkInIntervalMs));
+            strictEqual(requests.at(-1)?.checkInIntervalMs, nominal);
+            const expected = nominal * (1 + referenceJitterFraction(id));
             ok(Math.abs(state.intervalMs - expected) <= 1);
             if (!config.debug) deepStrictEqual(state.logs, []);
-            else if (config.checkInIntervalMs < 900_000)
+            else if (config.checkInIntervalMs !== nominal)
               ok(state.logs.some((line) => line.includes("clamped")));
           }),
         );
@@ -156,7 +126,37 @@ export const cadenceIntervalAndDebug: Scenario = {
     }),
 };
 
-export const lifecycleCheckIns: Scenario = {
+const stateSyncDebounce: Scenario = {
+  name: "reportable native transitions sync immediately and debounce until five quiet seconds",
+  tier: 1,
+  run: (context) =>
+    withAdapter(context, { lifecycle: true }, (command) =>
+      Effect.gen(function* () {
+        yield* waitForCheckIns(context, 1);
+        yield* waitForIdle(command);
+        yield* Effect.sleep("5500 millis");
+        const before = (yield* context.backend.receivedCheckIns()).length;
+
+        yield* command({ command: "prepareAction", stage: "pre-download" });
+        const leading = yield* waitForCheckIns(context, before + 1);
+        strictEqual(leading.at(-1)?.lifecycleState.type, "available");
+        yield* Effect.sleep("3 seconds");
+        yield* command({ command: "prepareAction", stage: "pre-download" });
+        const afterPreparation = yield* updaterActivity(command);
+        yield* Effect.sleep("2500 millis");
+        strictEqual((yield* context.backend.receivedCheckIns()).length, before + 1);
+
+        yield* Effect.sleep("3 seconds");
+        const requests = yield* waitForCheckIns(context, before + 2);
+        strictEqual(requests.length, before + 2);
+        strictEqual(requests.at(-1)?.lifecycleState.type, "available");
+        strictEqual(requests.at(-1)?.checkInIntervalMs, 1_800_000);
+        deepStrictEqual(yield* updaterActivity(command), afterPreparation);
+      }),
+    ),
+};
+
+const lifecycleCheckIns: Scenario = {
   name: "native foreground and supported resume triggers check in without overlapping or queuing attempts",
   tier: 1,
   run: (context) =>
@@ -192,9 +192,32 @@ export const lifecycleCheckIns: Scenario = {
     ),
 };
 
+const busyStateSync: Scenario = {
+  name: "a reportable transition during an in-flight heartbeat is sent after that request finishes",
+  tier: 1,
+  run: (context) =>
+    withAdapter(context, { lifecycle: true }, (command) =>
+      Effect.gen(function* () {
+        yield* waitForCheckIns(context, 1);
+        yield* waitForIdle(command);
+        yield* Effect.sleep("5500 millis");
+        const before = (yield* context.backend.receivedCheckIns()).length;
+        yield* context.backend.setNextCheckInDelay("600 millis");
+        yield* command({ command: "triggerLifecycle", event: "foreground" });
+        yield* waitForCheckIns(context, before + 1);
+        yield* command({ command: "prepareAction", stage: "pre-download" });
+        const requests = yield* waitForCheckIns(context, before + 2);
+        strictEqual(requests.at(-1)?.lifecycleState.type, "available");
+      }),
+    ),
+};
+
 export const cadenceResilienceScenarios = [
   boundedAttributes,
   installationPersistenceRecovery,
   cadenceIntervalAndDebug,
   lifecycleCheckIns,
+  stateSyncDebounce,
+  applyingStateSync,
+  busyStateSync,
 ];

@@ -38,6 +38,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Unused code
+        run: pnpm unused
+
       - name: Typecheck
         run: pnpm typecheck
 

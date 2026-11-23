@@ -4,7 +4,7 @@ import {
   scenariosToRelegate,
   writeHistory,
 } from "./relegationHistory.js";
-import type { ScenarioResult } from "./runAll.js";
+import type { ScenarioResult } from "../runner/runAll.js";
 
 /** Tier 1 must pass at 100%; tier 2 may regress to an 80% pass rate
  * before the run fails. Returns whichever tier each result should

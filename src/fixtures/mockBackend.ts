@@ -1,5 +1,6 @@
 import * as Schema from "effect/Schema";
 import { CheckInRequest as CheckInRequestSchema } from "../protocol/wireContract.js";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -19,11 +20,14 @@ import { serveHttpApiOnEphemeralPort } from "./serveHttpApi.js";
  * scenario drives the backend rather than the backend guessing. */
 export interface MockBackendHandle {
   readonly baseUrl: string;
+  readonly receivedCheckInAuthorization: () => Effect.Effect<ReadonlyArray<string>>;
   readonly receivedRawCheckIns: () => Effect.Effect<ReadonlyArray<unknown>>;
   readonly setNextResponse: (response: CheckInResponse) => Effect.Effect<void>;
   readonly receivedCheckIns: () => Effect.Effect<ReadonlyArray<CheckInRequest>>;
   /** Delays every later check-in response by this long, until cleared --
    * a resilience scenario's way of simulating a slow or hung backend. */
+  /** Holds responses until the returned release effect runs. */
+  readonly blockCheckInResponses: () => Effect.Effect<Effect.Effect<void>>;
   readonly setNextCheckInDelay: (duration: Duration.Input | null) => Effect.Effect<void>;
   /** Makes every later check-in fail outright instead of responding --
    * a resilience scenario's way of simulating an ingestion-side outage. */
@@ -46,10 +50,12 @@ export interface MockBackendHandle {
  * interrupted, and the port released, when that scope closes. */
 export function startMockBackend() {
   return Effect.gen(function* () {
+    const authorization = yield* Ref.make<ReadonlyArray<string>>([]);
     const rawReceived = yield* Ref.make<ReadonlyArray<unknown>>([]);
     const nextResponse = yield* Ref.make<CheckInResponse | null>(null);
     const received = yield* Ref.make<ReadonlyArray<CheckInRequest>>([]);
     const nextDelay = yield* Ref.make<Duration.Input | null>(null);
+    const checkInGate = yield* Ref.make<Deferred.Deferred<void> | null>(null);
     const nextFailure = yield* Ref.make(false);
     const inFlight = yield* Ref.make(0);
     const peakInFlight = yield* Ref.make(0);
@@ -62,7 +68,7 @@ export function startMockBackend() {
       yield* Ref.update(received, (log) => [...log, request]);
 
       return yield* trackInFlightThenRespondOrFail(
-        { nextResponse, nextDelay, nextFailure },
+        { nextResponse, nextDelay, nextFailure, checkInGate },
         { inFlight, peakInFlight },
       );
     });
@@ -91,8 +97,9 @@ export function startMockBackend() {
 
     const GroupLayer = HttpApiBuilder.group(MockBackendHttpApi, "ingestion", (handlers) =>
       handlers
-        .handle("checkIn", ({ payload }) =>
+        .handle("checkIn", ({ payload, headers }) =>
           Effect.gen(function* () {
+            yield* Ref.update(authorization, (log) => [...log, headers.authorization]);
             yield* Ref.update(rawReceived, (log) => [...log, payload]);
             return yield* respond(
               yield* Schema.decodeUnknownEffect(CheckInRequestSchema)(payload).pipe(Effect.orDie),
@@ -110,9 +117,20 @@ export function startMockBackend() {
 
     return {
       baseUrl: `http://localhost:${port}`,
+      receivedCheckInAuthorization: () => Ref.get(authorization),
       receivedRawCheckIns: () => Ref.get(rawReceived),
       setNextResponse: (response: CheckInResponse) => Ref.set(nextResponse, response),
       receivedCheckIns: () => Ref.get(received),
+      blockCheckInResponses: () =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          yield* Ref.set(checkInGate, gate);
+
+          return Effect.gen(function* () {
+            yield* Deferred.succeed(gate, undefined);
+            yield* Ref.set(checkInGate, null);
+          });
+        }),
       setNextCheckInDelay: (duration: Duration.Input | null) => Ref.set(nextDelay, duration),
       setNextCheckInFailure: ({ shouldFail }: { readonly shouldFail: boolean }) =>
         Ref.set(nextFailure, shouldFail),
@@ -136,6 +154,7 @@ function trackInFlightThenRespondOrFail(
     readonly nextResponse: Ref.Ref<CheckInResponse | null>;
     readonly nextDelay: Ref.Ref<Duration.Input | null>;
     readonly nextFailure: Ref.Ref<boolean>;
+    readonly checkInGate: Ref.Ref<Deferred.Deferred<void> | null>;
   },
   counters: { readonly inFlight: Ref.Ref<number>; readonly peakInFlight: Ref.Ref<number> },
 ) {
@@ -143,6 +162,10 @@ function trackInFlightThenRespondOrFail(
     const current = yield* Ref.updateAndGet(counters.inFlight, (n) => n + 1);
 
     yield* Ref.update(counters.peakInFlight, (peak) => Math.max(peak, current));
+
+    const gate = yield* Ref.get(script.checkInGate);
+
+    if (gate !== null) yield* Deferred.await(gate);
 
     const delay = yield* Ref.get(script.nextDelay);
 

@@ -1,40 +1,25 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
 import { NodeRuntime } from "@effect/platform-node";
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient } from "effect/http";
-import { applyRelegations, tier2PassRateBelowThreshold } from "./harness/conformanceGate.js";
-import { runEquivalenceCheck } from "./harness/equivalence.js";
-import { renderJUnitXml, toJUnitCase, type JUnitCase } from "./harness/junitReport.js";
-import { DEFAULT_TRACKED_RUNS } from "./harness/relegationHistory.js";
-import { runAllScenarios } from "./harness/runAll.js";
-import type { Scenario } from "./harness/scenario.js";
-import { connectToTestService } from "./harness/testServiceClient.js";
-import { cadenceResilienceScenarios } from "./scenarios/cadenceResilience.js";
-import { bufferedFactsScenarios } from "./scenarios/bufferedFacts.js";
-import { happyPathCheckIn } from "./scenarios/happyPathCheckIn.js";
+import { applyRelegations, tier2PassRateBelowThreshold } from "./reporting/conformanceGate.js";
+import { runEquivalenceCheck } from "./runner/equivalence.js";
+import { renderJUnitXml, toJUnitCase, type JUnitCase } from "./reporting/junitReport.js";
+import { DEFAULT_TRACKED_RUNS } from "./reporting/relegationHistory.js";
+import { runAllScenarios } from "./runner/runAll.js";
+import { connectToTestService } from "./fixtures/testServiceClient.js";
+import { scenariosFor } from "./runner/scenarios.js";
 import { jitterFractionEquivalence } from "./scenarios/jitterFractionEquivalence.js";
-import { preActionCheckScenarios } from "./scenarios/preActionCheck.js";
-import { policyScenarios } from "./scenarios/policy.js";
-import { resilienceScenarios } from "./scenarios/resilience.js";
 
-/** Every scenario needing the check-in handshake (mock backend + signed
- * keypair), not just `injectEvent` -- gated on `supportsCheckIn`, since a
- * test service without it can't run any of these. */
-const CHECK_IN_SCENARIOS: ReadonlyArray<Scenario> = [
-  happyPathCheckIn,
-  ...resilienceScenarios,
-  ...cadenceResilienceScenarios,
-  ...policyScenarios,
-  ...bufferedFactsScenarios,
-  ...preActionCheckScenarios,
-];
+function parseHistoryRuns(value: string): number {
+  const runs = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(runs) || runs < 1) {
+    throw new InvalidArgumentError("history runs must be a positive integer");
+  }
 
-function scenariosFor(capabilities: {
-  readonly supportsCheckIn: boolean;
-}): ReadonlyArray<Scenario> {
-  return capabilities.supportsCheckIn ? CHECK_IN_SCENARIOS : [];
+  return runs;
 }
 
 function writeJUnitReport(path: string, cases: ReadonlyArray<JUnitCase>): void {
@@ -104,6 +89,8 @@ function runEquivalence(namedUrlArgs: ReadonlyArray<string>, options: { readonly
       process.exit(1);
     }
 
+    if (testServiceBaseUrls.has(name)) throw new Error(`duplicate SDK name: ${name}`);
+
     testServiceBaseUrls.set(name, url);
   }
 
@@ -152,7 +139,7 @@ program
   .option(
     "--history-runs <n>",
     "how many recent runs a scenario's relegation/trend is tracked over",
-    (value: string) => Number.parseInt(value, 10),
+    (value: string) => parseHistoryRuns(value),
     DEFAULT_TRACKED_RUNS,
   )
   .action(
