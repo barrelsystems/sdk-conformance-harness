@@ -7,23 +7,23 @@ dependencies — the packages installed when something depends on
 linter, formatter, bundler, type checker) isn't distributed and isn't
 listed here.
 
-| Package | Version | License |
-| --- | --- | --- |
-| @effect/platform-node | 4.1.4 | MIT |
-| @effect/platform-node-shared | 4.1.4 | MIT |
-| @redis/bloom | 6.3.1 | MIT |
-| @redis/client | 6.3.1 | MIT |
-| @redis/json | 6.3.1 | MIT |
-| @redis/search | 6.3.1 | MIT |
-| @redis/time-series | 6.3.1 | MIT |
-| @types/node | 24.19.2 | MIT |
-| @types/ws | 8.18.2 | MIT |
-| commander | 15.1.0 | MIT |
-| effect | 4.1.4 | MIT |
-| redis | 6.3.1 | MIT |
-| undici | 8.12.4 | MIT |
-| undici-types | 7.24.6 | MIT |
-| ws | 8.23.0 | MIT |
+| Package                      | Version | License |
+| ---------------------------- | ------- | ------- |
+| @effect/platform-node        | 4.1.4   | MIT     |
+| @effect/platform-node-shared | 4.1.4   | MIT     |
+| @redis/bloom                 | 6.3.1   | MIT     |
+| @redis/client                | 6.3.1   | MIT     |
+| @redis/json                  | 6.3.1   | MIT     |
+| @redis/search                | 6.3.1   | MIT     |
+| @redis/time-series           | 6.3.1   | MIT     |
+| @types/node                  | 24.19.2 | MIT     |
+| @types/ws                    | 8.18.2  | MIT     |
+| commander                    | 15.1.0  | MIT     |
+| effect                       | 4.1.4   | MIT     |
+| redis                        | 6.3.1   | MIT     |
+| undici                       | 8.12.4  | MIT     |
+| undici-types                 | 7.24.6  | MIT     |
+| ws                           | 8.23.0  | MIT     |
 
 All 15 production dependency packages are MIT-licensed. None are
 copyleft (no GPL/LGPL/AGPL/MPL in this set).
